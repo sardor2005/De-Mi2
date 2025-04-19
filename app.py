@@ -1,121 +1,180 @@
-from flask import Flask, request, jsonify, render_template
-import hashlib
-import time
-from collections import OrderedDict
+from flask import Flask, render_template, request, redirect, url_for, flash, jsonify
+from flask_sqlalchemy import SQLAlchemy
+from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
+from werkzeug.security import generate_password_hash, check_password_hash
+from datetime import datetime
+import os
 
-app = Flask(__name__, static_folder='static', template_folder='templates')
+app = Flask(__name__)
+app.config['SECRET_KEY'] = 'your-secret-key-here'
+app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///site.db'
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
-# Хранилище данных
-users = OrderedDict()
-blockchain = []
-pending_transactions = []
+db = SQLAlchemy(app)
+login_manager = LoginManager(app)
+login_manager.login_view = 'login'
 
-class Block:
-    def __init__(self, index, previous_hash, timestamp, data, hash):
-        self.index = index
-        self.previous_hash = previous_hash
-        self.timestamp = timestamp
-        self.data = data
-        self.hash = hash
+# Модели
+class User(db.Model, UserMixin):
+    id = db.Column(db.Integer, primary_key=True)
+    username = db.Column(db.String(20), unique=True, nullable=False)
+    email = db.Column(db.String(120), unique=True, nullable=False)
+    password = db.Column(db.String(60), nullable=False)
+    balance = db.Column(db.Integer, default=0)
+    transactions_sent = db.relationship('Transaction', foreign_keys='Transaction.sender_id', backref='sender', lazy=True)
+    transactions_received = db.relationship('Transaction', foreign_keys='Transaction.recipient_id', backref='recipient', lazy=True)
 
-# Создаем генезис-блок
-def create_genesis_block():
-    return Block(
-        index=0,
-        previous_hash="0",
-        timestamp=time.time(),
-        data="Genesis Block",
-        hash=hashlib.sha256("0".encode()).hexdigest()
-    )
+    def __repr__(self):
+        return f"User('{self.username}', '{self.email}')"
 
-blockchain.append(create_genesis_block().__dict__)
+class Transaction(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    sender_id = db.Column(db.Integer, db.ForeignKey('user.id'))
+    recipient_id = db.Column(db.Integer, db.ForeignKey('user.id'))
+    amount = db.Column(db.Integer)
+    timestamp = db.Column(db.DateTime, default=datetime.utcnow)
 
+    def __repr__(self):
+        return f"Transaction('{self.sender_id}', '{self.recipient_id}', '{self.amount}')"
+
+# Инициализация базы данных
+with app.app_context():
+    db.create_all()
+
+@login_manager.user_loader
+def load_user(user_id):
+    return User.query.get(int(user_id))
+
+# Маршруты
 @app.route('/')
-def index():
+def home():
     return render_template('index.html')
 
-@app.route('/register', methods=['POST'])
+@app.route('/register', methods=['GET', 'POST'])
 def register():
-    data = request.get_json()
-    username = data.get('username')
-    password = data.get('password')
+    if request.method == 'POST':
+        username = request.form.get('username')
+        email = request.form.get('email')
+        password = request.form.get('password')
+        
+        existing_user = User.query.filter((User.username == username) | (User.email == email)).first()
+        if existing_user:
+            flash('Пользователь с таким именем или email уже существует', 'error')
+            return redirect(url_for('register'))
+        
+        hashed_password = generate_password_hash(password, method='sha256')
+        new_user = User(username=username, email=email, password=hashed_password, balance=100)  # Начальный баланс 100 коинов
+        
+        db.session.add(new_user)
+        db.session.commit()
+        
+        flash('Регистрация прошла успешно! Теперь вы можете войти.', 'success')
+        return redirect(url_for('login'))
+    
+    return render_template('register.html')
 
-    if not username or not password:
-        return jsonify({"error": "Username and password required"}), 400
-
-    if username in users:
-        return jsonify({"error": "Username already exists"}), 400
-
-    users[username] = {
-        'password': hashlib.sha256(password.encode()).hexdigest(),
-        'balance': 10  # Начальный баланс
-    }
-
-    return jsonify({"message": "User registered successfully"}), 201
-
-@app.route('/login', methods=['POST'])
+@app.route('/login', methods=['GET', 'POST'])
 def login():
-    data = request.get_json()
-    username = data.get('username')
-    password = data.get('password')
-
-    if not username or not password:
-        return jsonify({"error": "Username and password required"}), 400
-
-    user = users.get(username)
-    if not user or user['password'] != hashlib.sha256(password.encode()).hexdigest():
-        return jsonify({"error": "Invalid credentials"}), 401
-
-    return jsonify({
-        "message": "Login successful",
-        "balance": user['balance']
-    }), 200
-
-@app.route('/mine', methods=['POST'])
-def mine():
-    data = request.get_json()
-    username = data.get('username')
+    if request.method == 'POST':
+        username = request.form.get('username')
+        password = request.form.get('password')
+        
+        user = User.query.filter_by(username=username).first()
+        
+        if not user or not check_password_hash(user.password, password):
+            flash('Неверное имя пользователя или пароль', 'error')
+            return redirect(url_for('login'))
+        
+        login_user(user)
+        return redirect(url_for('dashboard'))
     
-    if not username:
-        return jsonify({"error": "Username required"}), 400
-    
-    if username not in users:
-        return jsonify({"error": "User not found"}), 404
+    return render_template('login.html')
 
-    last_block = blockchain[-1]
-    new_block = Block(
-        index=len(blockchain),
-        previous_hash=last_block['hash'],
-        timestamp=time.time(),
-        data=f"Block mined by {username}",
-        hash=hashlib.sha256(f"{len(blockchain)}{last_block['hash']}{time.time()}".encode()).hexdigest()
+@app.route('/dashboard')
+@login_required
+def dashboard():
+    return render_template('dashboard.html', user=current_user)
+
+@app.route('/wallet')
+@login_required
+def wallet():
+    return render_template('wallet.html', user=current_user)
+
+@app.route('/transfer', methods=['POST'])
+@login_required
+def transfer():
+    recipient_username = request.form.get('recipient')
+    amount = int(request.form.get('amount'))
+    
+    if current_user.username == recipient_username:
+        return jsonify({'error': 'Нельзя переводить себе'}), 400
+    
+    recipient = User.query.filter_by(username=recipient_username).first()
+    if not recipient:
+        return jsonify({'error': 'Пользователь не найден'}), 404
+    
+    if current_user.balance < amount:
+        return jsonify({'error': 'Недостаточно средств'}), 400
+    
+    if amount <= 0:
+        return jsonify({'error': 'Сумма должна быть положительной'}), 400
+    
+    # Выполняем транзакцию
+    current_user.balance -= amount
+    recipient.balance += amount
+    
+    # Записываем транзакцию
+    transaction = Transaction(
+        sender_id=current_user.id,
+        recipient_id=recipient.id,
+        amount=amount
     )
-
-    blockchain.append(new_block.__dict__)
-    users[username]['balance'] += 1  # Награда за майнинг
-
-    return jsonify({
-        "message": "New block mined",
-        "block": new_block.__dict__,
-        "balance": users[username]['balance']
-    }), 200
-
-@app.route('/chain', methods=['GET'])
-def get_chain():
-    return jsonify({
-        "chain": blockchain,
-        "length": len(blockchain)
-    }), 200
-
-@app.route('/balance/<username>', methods=['GET'])
-def get_balance(username):
-    if username not in users:
-        return jsonify({"error": "User not found"}), 404
+    db.session.add(transaction)
+    db.session.commit()
     
     return jsonify({
-        "username": username,
-        "balance": users[username]['balance']
-    }), 200
+        'success': True,
+        'new_balance': current_user.balance
+    })
+
+@app.route('/transactions')
+@login_required
+def get_transactions():
+    transactions = Transaction.query.filter(
+        (Transaction.sender_id == current_user.id) | 
+        (Transaction.recipient_id == current_user.id)
+    ).order_by(Transaction.timestamp.desc()).limit(50).all()
+    
+    transactions_data = []
+    for t in transactions:
+        transactions_data.append({
+            'id': t.id,
+            'sender': t.sender.username,
+            'recipient': t.recipient.username,
+            'amount': t.amount,
+            'timestamp': t.timestamp.isoformat(),
+            'type': 'outgoing' if t.sender_id == current_user.id else 'incoming'
+        })
+    
+    return jsonify(transactions_data)
+
+@app.route('/logout')
+@login_required
+def logout():
+    logout_user()
+    return redirect(url_for('home'))
+
+# API для работы с коинами
+@app.route('/add_coins', methods=['POST'])
+@login_required
+def add_coins():
+    amount = int(request.form.get('amount', 0))
+    current_user.balance += amount
+    db.session.commit()
+    return jsonify({
+        'success': True,
+        'new_balance': current_user.balance
+    })
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    app.run(debug=True)
