@@ -1,27 +1,22 @@
 {% extends "base.html" %}
+
 {% block content %}
-<div class="wallet-container">
-    <h2>Ваш баланс: {{ user.balance }} коинов</h2>
+<div class="wallet">
+    <h2>Ваш баланс: <span class="balance">{{ current_user.balance }}</span> коинов</h2>
     
-    <div class="transfer-form">
-        <h3>Перевод коинов</h3>
-        <form id="transferForm">
-            <div class="form-group">
-                <label>Получатель:</label>
-                <input type="text" name="recipient" required>
-            </div>
-            <div class="form-group">
-                <label>Сумма:</label>
-                <input type="number" name="amount" min="1" required>
-            </div>
+    <div class="transfer-box">
+        <h3>Перевод</h3>
+        <form id="transfer-form">
+            <input type="text" placeholder="Имя получателя" id="recipient" required>
+            <input type="number" placeholder="Сумма" id="amount" min="1" required>
             <button type="submit">Отправить</button>
         </form>
-        <div id="transferResult"></div>
+        <div id="transfer-result"></div>
     </div>
     
     <div class="transactions">
-        <h3>История транзакций</h3>
-        <table id="transactionsTable">
+        <h3>Последние операции</h3>
+        <table>
             <thead>
                 <tr>
                     <th>Тип</th>
@@ -30,12 +25,10 @@
                     <th>Дата</th>
                 </tr>
             </thead>
-            <tbody>
-                <!-- Транзакции будут загружены через JS -->
-            </tbody>
+            <tbody id="transactions-list"></tbody>
         </table>
     </div>
 </div>
 
-<script src="{{ url_for('static', filename='js/wallet.js') }}"></script>
+<script src="{{ url_for('static', filename='wallet.js') }}"></script>
 {% endblock %}
