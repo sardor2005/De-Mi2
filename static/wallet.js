@@ -1,13 +1,13 @@
 document.addEventListener('DOMContentLoaded', () => {
-    const transferForm = document.getElementById('transfer-form');
+    const form = document.getElementById('transfer-form');
     const resultDiv = document.getElementById('transfer-result');
-    
-    transferForm.addEventListener('submit', async (e) => {
+
+    form.addEventListener('submit', async (e) => {
         e.preventDefault();
         
         const recipient = document.getElementById('recipient').value;
         const amount = parseInt(document.getElementById('amount').value);
-        
+
         try {
             const response = await fetch('/transfer', {
                 method: 'POST',
@@ -18,21 +18,18 @@ document.addEventListener('DOMContentLoaded', () => {
             const data = await response.json();
             
             if (data.error) {
-                resultDiv.textContent = data.error;
-                resultDiv.style.color = 'red';
+                showError(data.error);
             } else {
-                resultDiv.textContent = `Успешно! Новый баланс: ${data.new_balance}`;
-                resultDiv.style.color = 'green';
-                document.querySelector('.balance').textContent = data.new_balance;
-                transferForm.reset();
+                updateBalance(data.new_balance);
+                showSuccess(`Перевод успешен! Новый баланс: ${data.new_balance}`);
+                form.reset();
                 loadTransactions();
             }
-        } catch (err) {
-            resultDiv.textContent = 'Ошибка сети';
-            resultDiv.style.color = 'red';
+        } catch (error) {
+            showError('Ошибка сети');
         }
     });
-    
+
     async function loadTransactions() {
         const response = await fetch('/transactions');
         const transactions = await response.json();
@@ -40,13 +37,28 @@ document.addEventListener('DOMContentLoaded', () => {
         
         tbody.innerHTML = transactions.map(tx => `
             <tr class="${tx.sender === '{{ current_user.username }}' ? 'outgoing' : 'incoming'}">
-                <td>${tx.sender === '{{ current_user.username }}' ? '➡️ Отправлено' : '⬅️ Получено'}</td>
+                <td>${tx.sender === '{{ current_user.username }}' ? 'Отправлено' : 'Получено'}</td>
                 <td>${tx.sender === '{{ current_user.username }}' ? tx.recipient : tx.sender}</td>
                 <td>${tx.amount}</td>
                 <td>${new Date(tx.timestamp).toLocaleString()}</td>
             </tr>
         `).join('');
     }
-    
+
+    function updateBalance(newBalance) {
+        document.querySelector('.balance').textContent = newBalance;
+    }
+
+    function showError(message) {
+        resultDiv.textContent = message;
+        resultDiv.style.color = 'red';
+    }
+
+    function showSuccess(message) {
+        resultDiv.textContent = message;
+        resultDiv.style.color = 'green';
+    }
+
+    // Первоначальная загрузка
     loadTransactions();
 });
