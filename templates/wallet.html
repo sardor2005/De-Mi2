@@ -5,17 +5,16 @@
     <h2>Ваш баланс: <span class="balance">{{ current_user.balance }}</span> коинов</h2>
     
     <div class="transfer-box">
-        <h3>Перевод</h3>
         <form id="transfer-form">
-            <input type="text" placeholder="Имя получателя" id="recipient" required>
+            <input type="text" placeholder="Логин получателя" id="recipient" required>
             <input type="number" placeholder="Сумма" id="amount" min="1" required>
-            <button type="submit">Отправить</button>
+            <button type="submit">Перевести</button>
         </form>
         <div id="transfer-result"></div>
     </div>
     
     <div class="transactions">
-        <h3>Последние операции</h3>
+        <h3>Последние переводы</h3>
         <table>
             <thead>
                 <tr>
