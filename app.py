@@ -175,6 +175,73 @@ def add_coins():
         'success': True,
         'new_balance': current_user.balance
     })
+# ... (ваш существующий код) ...
+
+# Добавьте эти новые модели
+class Transaction(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    sender_id = db.Column(db.Integer, db.ForeignKey('user.id'))
+    recipient_id = db.Column(db.Integer, db.ForeignKey('user.id'))
+    amount = db.Column(db.Integer)
+    timestamp = db.Column(db.DateTime, default=datetime.utcnow)
+
+# Добавьте поле balance в модель User (если его нет)
+if 'balance' not in [column.name for column in User.__table__.columns]:
+    User.balance = db.Column(db.Integer, default=100)
+    db.create_all()  # Обновит структуру БД
+
+# Новые маршруты
+@app.route('/wallet')
+@login_required
+def wallet():
+    return render_template('wallet.html')
+
+@app.route('/transfer', methods=['POST'])
+@login_required
+def transfer():
+    data = request.get_json()
+    recipient = data.get('recipient')
+    amount = int(data.get('amount', 0))
+    
+    if current_user.username == recipient:
+        return jsonify({'error': 'Нельзя переводить себе!'}), 400
+    
+    recipient_user = User.query.filter_by(username=recipient).first()
+    if not recipient_user:
+        return jsonify({'error': 'Пользователь не найден'}), 404
+    
+    if current_user.balance < amount:
+        return jsonify({'error': 'Недостаточно средств'}), 400
+    
+    current_user.balance -= amount
+    recipient_user.balance += amount
+    
+    transaction = Transaction(
+        sender_id=current_user.id,
+        recipient_id=recipient_user.id,
+        amount=amount
+    )
+    db.session.add(transaction)
+    db.session.commit()
+    
+    return jsonify({'success': True, 'new_balance': current_user.balance})
+
+@app.route('/transactions')
+@login_required
+def transactions():
+    txs = Transaction.query.filter(
+        (Transaction.sender_id == current_user.id) | 
+        (Transaction.recipient_id == current_user.id)
+    ).order_by(Transaction.timestamp.desc()).all()
+    
+    return jsonify([{
+        'sender': tx.sender.username,
+        'recipient': tx.recipient.username,
+        'amount': tx.amount,
+        'timestamp': tx.timestamp.isoformat()
+    } for tx in txs])
+
+# ... (ваш существующий код) ...
 
 if __name__ == '__main__':
     app.run(debug=True)
